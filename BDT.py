@@ -8,21 +8,26 @@ import pandas as pd
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
+import psutil
+from multiprocessing import Pool
+import argparse
+from to_TVMA import convert_model
+
+parser = argparse.ArgumentParser()
+parser.add_argument("-n", "--num_jobs", required=False)
+parser.add_argument("-i", "--index", required = False)
+args = parser.parse_args()
+
 
 MODE = 15
-MAX_FILE = -1
+MAX_FILE = 10
 MAX_EVT = -1
 DEBUG = False
-PRNT_EVT = 100
-evt_tree  = TChain('EMTFNtuple/tree')
+PRNT_EVT = 10000
+
 folders = ["/afs/cern.ch/user/n/nhurley/CMSSW_12_3_0/src/EMTF_MC_NTuple_SingleMu_new_neg.root", "/afs/cern.ch/user/n/nhurley/CMSSW_12_3_0/src/EMTF_MC_NTuple_SingleMu_pos_new.root"]
+base_dirs = ["/eos/user/n/nhurley/SingleMu/SingleMuFlatOneOverPt1To1000GeV_Ntuple_fixed__negEndcap_v2/221215_114244/0000/", "/eos/user/n/nhurley/SingleMu/SingleMuFlatOneOverPt1To1000GeV_Ntuple_fixed__posEndcap_v2/221215_111111/"]
 
-#access ROOT files in folder above
-break_loop = False
-nFiles = 0
-
-for folder in folders:
-    evt_tree.Add(folder)
 
 #station-station transitions for delta phi's and theta's
 transitions = ["12", "13", "14", "23", "24", "34"]
@@ -40,6 +45,28 @@ station_transition_map = {
             3:[1, 3, 5],
             4: [2, 4, 5]}
 
+evt_tree  = TChain('EMTFNtuple/tree')
+
+#recursivelh access different subdirectories of given folder from above
+file_list = []
+break_loop = False
+for base_dir in base_dirs:
+    nFiles = 0
+    for dirname, dirs, files in os.walk(base_dir):
+        if break_loop: break
+        for file in files:
+            if break_loop: break
+            if not '.root' in file: continue
+            file_name = "%s/%s" % (dirname, file)
+            nFiles   += 1
+            print ('* Loading file #%s: %s' % (nFiles, file))
+            evt_tree.Add(file_name)
+            if nFiles >= MAX_FILE/2: break_loop = True
+
+
+#Flag for breaking loop if we hit max file limit
+break_loop = False
+
 #Data frame containing a list of these feature dictionaries, columns are features, rows are different tracks
 X = pd.DataFrame()
 Y = np.array([])
@@ -47,6 +74,7 @@ W = np.array([])
 #we will want to break the loop when debugging and look at a single entry
 event_break = False    
 #loop through all events in the input file
+
 for event in range(evt_tree.GetEntries()):
     if event_break: break
     if event == MAX_EVT: break
@@ -67,7 +95,7 @@ for event in range(evt_tree.GetEntries()):
     features["mode"] = mode
 
     #only accept the mode we want to train
-    
+    if not mode == MODE: break
 
     #convert mode to station bit-array representation
     station_isPresent = np.unpackbits(np.array([mode], dtype='>i8').view(np.uint8))[-4:]
@@ -132,7 +160,6 @@ for event in range(evt_tree.GetEntries()):
             for transition in station_transition_map[i + 1]:
                 if features["dPhi_" + str(transitions[transition])] != -999 and "signPhi" not in features.keys():
                     features["signPhi"] = 1 if features["dPhi_" + str(transitions[transition])] >= 0 else -1
-
                     break
 
     for i in ['12', '13', '14', '23', '24', '34']:
@@ -168,15 +195,11 @@ for event in range(evt_tree.GetEntries()):
         features["dPhiSum3"] = sum([deltaPh_list[transition] for transition in other_transitions])
         features["dPhiSum3A"] = sum([abs(deltaPh_list[transition]) for transition in other_transitions])
 
-        
-        
-
-    
     if DEBUG and mode == MODE:
         for k, v in features.items():
             print(k + " = " + str(v))
 
-    if not mode == MODE: break
+    
 
     x_ = {}
     for key in Run3TrainingVariables[str(MODE)]:
@@ -212,8 +235,6 @@ for event in range(evt_tree.GetEntries()):
     Y = np.append(Y, log(evt_tree.genPart_pt[0]))
     W = np.append(W, 1. / log2(evt_tree.genPart_pt[0] + 0.000001))
 
-
-
 X_train, X_test, Y_train, Y_test, W_train, W_test = train_test_split(X, Y, W, test_size=.5, random_state=123)
 dtrain = xgb.DMatrix(data = X_train, label = Y_train, weight = W_train)
 dtest = xgb.DMatrix(data = X_test, label = Y_test, weight = W_test)
@@ -222,7 +243,8 @@ xg_reg = xgb.XGBRegressor(objective = 'reg:linear',
                         learning_rate = .1, 
                         max_depth = 5, 
                         n_estimators = 400,
-                        max_bins = 1000)
+                        max_bins = 1000,
+                        nthread = 30)
 
 xg_reg.fit(X_train, Y_train, sample_weight = W_train)
 
@@ -243,12 +265,12 @@ preds = xg_reg.predict(X_test)
 for i, y in enumerate(Y_test):
     pt_real = exp(y)
     pt_pred = exp(preds[i])
-    if pt_real > 22:
-        h_pt.Fill(pt_real)
-        h_pt_2.Fill(pt_real)
-        if pt_pred > 22:
-            h_pt_trg.Fill(pt_real)
-            h_pt_trg_2.Fill(pt_real)
+    
+    h_pt.Fill(pt_real)
+    h_pt_2.Fill(pt_real)
+    if pt_pred > 22:
+        h_pt_trg.Fill(pt_real)
+        h_pt_trg_2.Fill(pt_real)
 
 h_pt_trg.Divide(h_pt)
 h_pt_trg.Write()
@@ -260,3 +282,7 @@ del outfile
 rmse = np.sqrt(mean_squared_error(Y_test, preds))
 
 print("RMSE: %f" % (rmse))
+model = xg_reg._Booster.get_dump()
+
+input_vars = [(x, 'I') for x in X.head()]
+convert_model(model,input_variables = input_vars, output_xml='xgboost.xml')
