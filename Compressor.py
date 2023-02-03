@@ -46,21 +46,21 @@ class Compressor(dict):
         theta = self['theta']
         mode = int(self['mode'])
         if mode == 15:
-            if self["St1_ring2"] == 0:
+            if self["st1_ring2"] == 0:
                 theta = (min(max(theta, 5), 52) - 5) / 6
             else:
                 theta = ((min(max(theta, 46), 87) - 46) / 7) + 8
         else: 
-            if not self["St1_ring2"]: theta = (max(theta, 1) - 1) / 4
+            if not self["st1_ring2"]: theta = (max(theta, 1) - 1) / 4
             else: theta = ((min(theta, 104) - 1) / 4) + 6
         self['theta'] = int(theta)
         
-        if mode == 15 and not self["St1_ring2"]:
+        if mode == 15 and not self["st1_ring2"]:
             if theta < 4:
                 self['RPC_3'] = 0
                 self['RPC_4'] = 0
 
-        nRPCs = sum(self['RPC_' + str(i + 1)] for i in range(4))
+        nRPCs = sum(self['RPC_' + str(i + 1)] if self['presence_' + str(i+1)] else 0 for i in range(4))
 
         if nRPCs >= 2:
             if mode == 15:
@@ -71,7 +71,7 @@ class Compressor(dict):
                     self['RPC_4'] = 0
                 elif (self['RPC_4'] and self['RPC_2']):
                     self['RPC_3'] = 0
-                elif (self['RPC_3'] and self['RPC_4'] and not self['St1_ring2']):
+                elif (self['RPC_3'] and self['RPC_4'] and not self['st1_ring2']):
                     self['RPC_3'] = 0
             elif mode == 14:
                 if self['RPC_1']:

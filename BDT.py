@@ -16,11 +16,14 @@ from to_TVMA import convert_model
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--num_jobs", required=False)
 parser.add_argument("-i", "--index", required = False)
+parser.add_argument("-m", "--mode", required = True)
 args = parser.parse_args()
 
 
-MODE = 15
-MAX_FILE = 10
+MODE = int(args.mode)
+print(MODE)
+
+MAX_FILE = 20
 MAX_EVT = -1
 DEBUG = False
 PRNT_EVT = 10000
@@ -49,9 +52,9 @@ evt_tree  = TChain('EMTFNtuple/tree')
 
 #recursivelh access different subdirectories of given folder from above
 file_list = []
-break_loop = False
 for base_dir in base_dirs:
     nFiles = 0
+    break_loop = False
     for dirname, dirs, files in os.walk(base_dir):
         if break_loop: break
         for file in files:
@@ -127,10 +130,11 @@ for event in range(evt_tree.GetEntries()):
 
     #scalar features
     
-    features["St1_ring2"] = evt_tree.emtfTrack_ptLUT_st1_ring2[track]
+    features["st1_ring2"] = evt_tree.emtfTrack_ptLUT_st1_ring2[track]
     #vector features by station
     for station, pattern in enumerate(station_pattern):
         if pattern == -99 or pattern == 10: bend = 0
+        if not station_isPresent[station]: continue
         elif pattern % 2 == 0: bend = (10 - pattern) / 2
         elif pattern % 2 == 1: bend = -1 * (11 - pattern) / 2
 
@@ -282,7 +286,8 @@ del outfile
 rmse = np.sqrt(mean_squared_error(Y_test, preds))
 
 print("RMSE: %f" % (rmse))
-model = xg_reg._Booster.get_dump()
+
 
 input_vars = [(x, 'I') for x in X.head()]
-convert_model(model,input_variables = input_vars, output_xml='xgboost.xml')
+for idx, tree in enumerate(xg_reg.get_booster().get_dump()):
+    convert_model([tree],itree = idx,input_variables = input_vars, output_xml=f'/afs/cern.ch/user/n/nhurley/BDT/mode_{MODE}_trees/{idx}.xml')

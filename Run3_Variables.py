@@ -9,7 +9,7 @@ Run3TrainingVariables = {
     # BASELINE mode 15 - dPhi12/23/34 + combos, theta, FR1, St1 ring, dTh14, bend1, RPC 1/2/3/4
     '15' : [
         'theta',
-        'St1_ring2',
+        'st1_ring2',
         'dPhi_12',
         'dPhi_23',
         'dPhi_34',
